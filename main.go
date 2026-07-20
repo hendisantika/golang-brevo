@@ -13,13 +13,23 @@ import (
 	"time"
 
 	"golang-brevo/internal/brevo"
+	"golang-brevo/internal/dotenv"
 )
 
-// apiKeyEnv holds the Brevo credential. It is read from the environment so the
-// key never lands in shell history or a committed flag default.
-const apiKeyEnv = "BREVO_API_KEY"
+// Credentials are read from the environment — populated either by the shell or
+// by a gitignored .env file — so they never land in shell history or a
+// committed flag default.
+const (
+	apiKeyEnv     = "BREVO_API_KEY"
+	senderEnv     = "BREVO_SENDER_EMAIL"
+	senderNameEnv = "BREVO_SENDER_NAME"
+)
+
+// defaultEnvFile is loaded when -env-file is not given. Missing is fine.
+const defaultEnvFile = ".env"
 
 type config struct {
+	envFile  string
 	from     string
 	fromName string
 	to       stringList
@@ -55,8 +65,9 @@ func run(args []string) error {
 	var cfg config
 
 	fs := flag.NewFlagSet("golang-brevo", flag.ContinueOnError)
-	fs.StringVar(&cfg.from, "from", "", "sender email address (required)")
-	fs.StringVar(&cfg.fromName, "from-name", "", "sender display name")
+	fs.StringVar(&cfg.envFile, "env-file", defaultEnvFile, "path to a .env file holding credentials")
+	fs.StringVar(&cfg.from, "from", "", "sender email address (defaults to $"+senderEnv+")")
+	fs.StringVar(&cfg.fromName, "from-name", "", "sender display name (defaults to $"+senderNameEnv+")")
 	fs.Var(&cfg.to, "to", "recipient email; repeatable or comma-separated (required)")
 	fs.StringVar(&cfg.subject, "subject", "", "email subject (required)")
 	fs.StringVar(&cfg.text, "text", "", "plain-text body")
@@ -66,15 +77,19 @@ func run(args []string) error {
 		fmt.Fprintf(fs.Output(), "Send a tagged transactional email via the Brevo API.\n\n")
 		fmt.Fprintf(fs.Output(), "Usage:\n  golang-brevo [flags]\n\nFlags:\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(fs.Output(), "\nThe %s environment variable must be set.\n", apiKeyEnv)
+		fmt.Fprintf(fs.Output(), "\nCredentials are read from %s, %s, and %s.\n", apiKeyEnv, senderEnv, senderNameEnv)
+		fmt.Fprintf(fs.Output(), "These come from a %s file in the working directory, or from the\n", defaultEnvFile)
+		fmt.Fprintf(fs.Output(), "shell environment, which takes precedence. See .env.example.\n")
+		fmt.Fprintf(fs.Output(), "\nExample .env:\n"+
+			"  %s=xkeysib-...\n"+
+			"  %s=no-reply@example.com\n"+
+			"  %s=Example\n", apiKeyEnv, senderEnv, senderNameEnv)
 		fmt.Fprintf(fs.Output(), "\nExample:\n"+
-			"  export %s=xkeysib-...\n"+
 			"  golang-brevo \\\n"+
-			"    -from no-reply@example.com -from-name \"Example\" \\\n"+
 			"    -to user@example.com \\\n"+
 			"    -subject \"Welcome aboard\" \\\n"+
 			"    -text \"Thanks for signing up.\" \\\n"+
-			"    -tag onboarding -tag welcome\n", apiKeyEnv)
+			"    -tag onboarding -tag welcome\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -85,9 +100,33 @@ func run(args []string) error {
 		return err
 	}
 
+	// An explicitly requested env file must exist; the default one may not.
+	explicitEnvFile := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "env-file" {
+			explicitEnvFile = true
+		}
+	})
+	if explicitEnvFile {
+		if _, err := os.Stat(cfg.envFile); err != nil {
+			return fmt.Errorf("env file %s: %w", cfg.envFile, err)
+		}
+	}
+	if err := dotenv.Load(cfg.envFile); err != nil {
+		return err
+	}
+
 	apiKey := os.Getenv(apiKeyEnv)
 	if apiKey == "" {
-		return fmt.Errorf("%s is not set; export your Brevo API key first", apiKeyEnv)
+		return fmt.Errorf("%s is not set; add it to %s or export it (see .env.example)", apiKeyEnv, cfg.envFile)
+	}
+
+	// Flags win over the environment, so a .env sender can be overridden per run.
+	if cfg.from == "" {
+		cfg.from = os.Getenv(senderEnv)
+	}
+	if cfg.fromName == "" {
+		cfg.fromName = os.Getenv(senderNameEnv)
 	}
 
 	client, err := brevo.New(apiKey)

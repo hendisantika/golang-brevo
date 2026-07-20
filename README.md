@@ -5,20 +5,45 @@ Standard library only — no external dependencies.
 
 ## Setup
 
-Grab an API key from **Brevo → SMTP & API → API Keys**, then export it:
+Grab an API key from **Brevo → SMTP & API → API Keys**, then create a `.env`:
 
 ```bash
-export BREVO_API_KEY=xkeysib-...
+cp .env.example .env
+# edit .env and paste your key
 ```
 
-The key is only ever read from the environment, so it stays out of your shell
-history and out of the repository.
+```ini
+BREVO_API_KEY=xkeysib-...
+BREVO_SENDER_EMAIL=no-reply@example.com
+BREVO_SENDER_NAME=Example
+```
+
+`.env` is gitignored, so the key stays out of your shell history and out of the
+repository. `.env.example` is committed as a template and holds no secrets.
+
+Exporting the variables in your shell works too — no `.env` required.
+
+### Precedence
+
+Credentials resolve in this order, first match winning:
+
+1. Command-line flag (`-from`, `-from-name`)
+2. Shell environment variable
+3. `.env` file
+
+A `.env` value never overwrites something already set in the environment, so the
+file stays a local-development convenience and can't silently override
+production configuration.
+
+Point at a different file with `-env-file path/to/.env`. A missing default
+`.env` is fine; a missing file you asked for explicitly is an error.
 
 ## Usage
 
+With the sender in `.env`, a send is just recipient plus content:
+
 ```bash
 go run . \
-  -from no-reply@example.com -from-name "Example" \
   -to user@example.com \
   -subject "Welcome aboard" \
   -text "Thanks for signing up." \
@@ -49,6 +74,12 @@ request rather than sent as an empty array.
 ## Library use
 
 ```go
+// Populates the environment from .env without overwriting existing values.
+// A missing file is not an error.
+if err := dotenv.Load(".env"); err != nil {
+    return err
+}
+
 client, err := brevo.New(os.Getenv("BREVO_API_KEY"))
 if err != nil {
     return err
@@ -114,4 +145,5 @@ go test ./...
 ```
 
 Tests run against an `httptest` stub via `brevo.WithBaseURL`, so they never
-contact the live API or need a key.
+contact the live API or need a key. The dotenv tests use `t.TempDir` and
+`t.Setenv`, so they leave no files or environment state behind.
