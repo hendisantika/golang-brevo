@@ -17,14 +17,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         # Read the version from go.mod so CI can never drift behind the
         # toolchain the module actually requires.
         go-version-file: 'go.mod'
+        # The module has no third-party dependencies, so there is no go.sum
+        # for the cache to key on and every run logs a restore failure.
+        cache: false
 
     - name: Verify formatting
       run: |
